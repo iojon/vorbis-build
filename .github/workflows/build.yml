@@ -1,0 +1,61 @@
+name: Builds
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    name: Build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          repository: xiph/ogg
+          path: ogg
+      
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          repository: xiph/vorbis
+          path: vorbis
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        shell: powershell
+        run: |
+          $FLAGS = "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=ON"
+          mkdir ogg\build -Force
+          pushd ogg\build
+          Add-Content ..\CMakeLists.txt 'set_target_properties(ogg PROPERTIES PREFIX "lib")'
+          (Get-Content ..\win32\ogg.def | %{$_ -replace "LIBRARY ogg","LIBRARY libogg"}) | Set-Content ..\win32\ogg.def
+          cmake -G Ninja .. $FLAGS
+          ninja
+          popd
+          mkdir vorbis\build -Force
+          pushd vorbis\build
+          Add-Content ..\CMakeLists.txt 'set_target_properties(vorbis PROPERTIES PREFIX "lib")'
+          cmake -G Ninja .. "-DCMAKE_PREFIX_PATH=${PWD}\..\..\ogg\build;${PWD}\..\..\ogg" -DBUILD_TESTING=OFF $FLAGS
+          ninja
+          popd
+          mkdir artifacts
+          copy ogg\build\libogg.dll artifacts
+          copy vorbis\build\lib\libvorbis.dll artifacts
+          7z a lib.zip artifacts\libogg.dll artifacts\libvorbis.dll
+
+      - name: Create Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: Binary
+          path: lib.zip
+          if-no-files-found: error
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "*.zip"
+          token: ${{ secrets.GITHUB_TOKEN }}
